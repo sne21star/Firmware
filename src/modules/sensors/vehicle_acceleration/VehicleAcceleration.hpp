@@ -97,8 +97,6 @@ private:
 		{this, ORB_ID(sensor_accel), 2}
 	};
 
-	perf_counter_t _interval_perf{perf_alloc(PC_INTERVAL, MODULE_NAME": interval")};
-
 	matrix::Dcmf _board_rotation;
 
 	matrix::Vector3f _bias{0.f, 0.f, 0.f};
@@ -116,6 +114,10 @@ private:
 
 	float _filter_sample_rate{kInitialRateHz};
 	int _sample_rate_incorrect_count{0};
+
+	hrt_abstime _timestamp_sample_last{0};
+	float _interval_sum{0.f};
+	float _interval_count{0.f};
 
 	uint32_t _selected_sensor_device_id{0};
 	uint8_t _selected_sensor_sub_index{0};

@@ -49,8 +49,6 @@ VehicleAcceleration::VehicleAcceleration() :
 VehicleAcceleration::~VehicleAcceleration()
 {
 	Stop();
-
-	perf_free(_interval_perf);
 }
 
 bool VehicleAcceleration::Start()
@@ -82,15 +80,15 @@ void VehicleAcceleration::Stop()
 
 void VehicleAcceleration::CheckFilters()
 {
-	if ((hrt_elapsed_time(&_filter_check_last) > 100_ms)) {
+	if ((hrt_elapsed_time(&_filter_check_last) > 100_ms) && _interval_count > 1500) {
 		_filter_check_last = hrt_absolute_time();
 
 		// calculate sensor update rate
-		const float sample_interval_avg = perf_mean(_interval_perf);
+		const float sample_interval_avg = _interval_sum / _interval_count;
 
 		if (PX4_ISFINITE(sample_interval_avg) && (sample_interval_avg > 0.0f)) {
 
-			const float update_rate_hz = 1.0f / sample_interval_avg;
+			const float update_rate_hz = 1.e6f / sample_interval_avg;
 
 			if ((fabsf(update_rate_hz) > 0.0f) && PX4_ISFINITE(update_rate_hz)) {
 				_update_rate_hz = update_rate_hz;
@@ -106,7 +104,7 @@ void VehicleAcceleration::CheckFilters()
 		const bool lp_updated = (fabsf(_lp_filter.get_cutoff_freq() - _param_imu_accel_cutoff.get()) > 0.01f);
 
 		if (sample_rate_updated || lp_updated) {
-			PX4_INFO("updating filter, sample rate: %.3f Hz -> %.3f Hz", (double)_filter_sample_rate, (double)_update_rate_hz);
+			PX4_DEBUG("updating filter, sample rate: %.3f Hz -> %.3f Hz", (double)_filter_sample_rate, (double)_update_rate_hz);
 			_filter_sample_rate = _update_rate_hz;
 
 			// update software low pass filters
@@ -115,6 +113,14 @@ void VehicleAcceleration::CheckFilters()
 
 			// reset state
 			_sample_rate_incorrect_count = 0;
+			_interval_sum = 0.f;
+			_interval_count = 0.f;
+		}
+
+		// clear periodically
+		if (_interval_count > 50000) {
+			_interval_sum = 0.f;
+			_interval_count = 0.f;
 		}
 	}
 }
@@ -209,6 +215,9 @@ bool VehicleAcceleration::SensorSelectionUpdate(bool force)
 
 						// reset sample rate monitor
 						_sample_rate_incorrect_count = 0;
+						_interval_sum = 0.f;
+						_interval_count = 0.f;
+						_timestamp_sample_last = 0;
 
 						return true;
 					}
@@ -267,7 +276,12 @@ void VehicleAcceleration::Run()
 		if (_sensor_sub[_selected_sensor_sub_index].copy(&sensor_data)) {
 
 			if (sensor_updated) {
-				perf_count_interval(_interval_perf, sensor_data.timestamp_sample);
+				if ((_timestamp_sample_last > 0) && (sensor_data.timestamp_sample > _timestamp_sample_last)) {
+					_interval_sum += (sensor_data.timestamp_sample - _timestamp_sample_last);
+					_interval_count++;
+				}
+
+				_timestamp_sample_last = sensor_data.timestamp_sample;
 			}
 
 			CheckFilters();
